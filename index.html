@@ -98,13 +98,15 @@ document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>{
   $('#p-yt').classList.toggle('hide',t.dataset.t!=='yt');
 });
 
-let file=null, fileURL=null;
-$('#file').onchange=e=>{
-  file=e.target.files[0]; if(!file)return;
+let file=null, fileURL=null, SEG=[];
+function setFile(f){
+  file=f; inputWritten=false;
   if(fileURL)URL.revokeObjectURL(fileURL);
-  fileURL=URL.createObjectURL(file);
-  $('#vid').src=fileURL; $('#vid').classList.remove('hide'); $('#goUp').disabled=false;
-};
+  fileURL=URL.createObjectURL(f);
+  const v=$('#vid'); v.src=fileURL; v.classList.remove('hide'); $('#goUp').disabled=false;
+  return new Promise(res=>{ v.onloadedmetadata=()=>res(); setTimeout(res,4000); });
+}
+$('#file').onchange=e=>{ if(e.target.files[0])setFile(e.target.files[0]); };
 
 async function analyze(segments,count,len,duration){
   const [min,max]=len.split('-').map(Number);
@@ -136,6 +138,7 @@ $('#goUp').onclick=async()=>{
     const out=await asr(audio,{chunk_length_s:30,stride_length_s:5,return_timestamps:true});
     const segments=(out.chunks||[]).filter(c=>c.text.trim()).map(c=>({start:c.timestamp[0]||0,end:c.timestamp[1]??((c.timestamp[0]||0)+3),text:c.text.trim()}));
     if(!segments.length)throw new Error('No speech detected in this file.');
+    SEG=segments;
 
     setStatus('AI is picking the best moments…',85);
     const clips=await analyze(segments,$('#count').value,$('#len').value,duration);
@@ -147,6 +150,7 @@ $('#goUp').onclick=async()=>{
 
 function renderUpload(clips){
   const box=$('#results'); box.innerHTML='';
+  const items=[];
   clips.forEach((c,i)=>{
     const d=document.createElement('div'); d.className='card clip';
     d.innerHTML=`<div><h3>${i+1}. ${esc(c.title)}<span class="score">${c.score}/100</span></h3>
@@ -162,13 +166,21 @@ function renderUpload(clips){
           <option value="v45">4:5 crop (Instagram feed)</option>
         </select>
         <label class="chk">Crop position <input type="range" class="pos" min="0" max="100" value="50"></label>
+        <label class="chk"><input type="checkbox" class="cap" checked> Captions</label>
         <button class="dl">Download clip</button>
         <span class="meta st"></span>
       </div>`;
     d.querySelector('.pv').onclick=()=>{ const v=$('#vid'); v.currentTime=c.start; v.play(); v.scrollIntoView({behavior:'smooth',block:'center'}); const stop=()=>{ if(v.currentTime>=c.end){v.pause();v.removeEventListener('timeupdate',stop);} }; v.addEventListener('timeupdate',stop); };
     d.querySelector('.dl').onclick=()=>cut(c,i,d);
+    items.push([c,i,d]);
     box.appendChild(d);
   });
+  if(items.length>1){
+    const all=document.createElement('div'); all.className='card';
+    all.innerHTML='<div class="row"><button class="all">Render all clips</button><span class="meta">Uses the format, crop and caption settings of each clip. Rendering runs in your browser, so it can take a few minutes per clip.</span></div>';
+    all.querySelector('.all').onclick=async()=>{ for(const [c,i,d] of items){ await cut(c,i,d); } };
+    box.prepend(all);
+  }
 }
 
 function cropTo(ar,ow,oh,pos){
@@ -185,6 +197,55 @@ function filterFor(mode,pos){
   if(mode==='v45') return cropTo(4/5,720,900,pos);
   if(mode==='blur916') return 'split[a][b];[a]scale=720:1280:force_original_aspect_ratio=increase,crop=720:1280,boxblur=20:5[bg];[b]scale=720:-2[fg];[bg][fg]overlay=(W-w)/2:(H-h)/2';
   return '';
+}
+
+function outDims(mode){
+  if(mode==='v916'||mode==='blur916') return {w:720,h:1280};
+  if(mode==='sq') return {w:720,h:720};
+  if(mode==='v45') return {w:720,h:900};
+  const v=$('#vid'); return {w:v.videoWidth||1280,h:v.videoHeight||720};
+}
+function assT(t){
+  const cs=Math.max(0,Math.round(t*100));
+  const h=Math.floor(cs/360000), m=Math.floor(cs%360000/6000), s=Math.floor(cs%6000/100), c=cs%100;
+  return h+':'+String(m).padStart(2,'0')+':'+String(s).padStart(2,'0')+'.'+String(c).padStart(2,'0');
+}
+function buildASS(c,dim){
+  const W=dim.w,H=dim.h, vertical=H>W;
+  const size=Math.round(Math.min(W,H)*0.095), outline=Math.max(3,Math.round(size/12));
+  const marginV=Math.round(H*(vertical?0.26:0.08));
+  const ev=[]; let prevEnd=0;
+  for(const s of SEG){
+    const t0=Math.max(s.start,c.start), t1=Math.min(s.end,c.end);
+    if(t1<=t0) continue;
+    const words=String(s.text).replace(/[{}\\]/g,'').replace(/\s+/g,' ').trim().split(' ').filter(Boolean);
+    if(!words.length) continue;
+    const per=(t1-t0)/words.length;
+    for(let k=0;k<words.length;k+=3){
+      const g=words.slice(k,k+3);
+      let a=t0+k*per-c.start; const b=t0+(k+g.length)*per-c.start;
+      a=Math.max(a,prevEnd);
+      if(b-a<0.15) continue;
+      prevEnd=b;
+      ev.push('Dialogue: 0,'+assT(a)+','+assT(b)+',Default,,0,0,0,,'+g.join(' ').toUpperCase());
+    }
+  }
+  if(!ev.length) return null;
+  return '[Script Info]\nScriptType: v4.00+\nPlayResX: '+W+'\nPlayResY: '+H+'\nWrapStyle: 2\n\n'
+   +'[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\n'
+   +'Style: Default,Anton,'+size+',&H00FFFFFF,&H000000FF,&H00000000,&H64000000,0,0,0,0,100,100,1,0,1,'+outline+',2,2,40,40,'+marginV+',1\n\n'
+   +'[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n'+ev.join('\n')+'\n';
+}
+let fontReady=false;
+async function ensureFont(f,st){
+  if(fontReady) return;
+  st.textContent='Loading caption font…';
+  const r=await fetch('https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/anton/Anton-Regular.ttf');
+  if(!r.ok) throw new Error('font download failed');
+  const buf=new Uint8Array(await r.arrayBuffer());
+  try{ await f.createDir('/fonts'); }catch(e){}
+  await f.writeFile('/fonts/Anton-Regular.ttf',buf);
+  fontReady=true;
 }
 
 let ff=null;
@@ -207,7 +268,18 @@ async function cut(c,i,d){
   try{
     const f=await getFF(st);
     if(!inputWritten){ st.textContent='Preparing file…'; await f.writeFile('in.mp4',await FFmpegUtil.fetchFile(file)); inputWritten=true; }
-    const vf=filterFor(d.querySelector('.fmt').value,d.querySelector('.pos').value/100);
+    const mode=d.querySelector('.fmt').value;
+    let vf=filterFor(mode,d.querySelector('.pos').value/100);
+    if(d.querySelector('.cap').checked && SEG.length){
+      try{
+        await ensureFont(f,st);
+        const ass=buildASS(c,outDims(mode));
+        if(ass){
+          await f.writeFile('cap.ass',new TextEncoder().encode(ass));
+          vf=(vf?vf+',':'')+'ass=cap.ass:fontsdir=/fonts';
+        }
+      }catch(e){ st.textContent='Captions skipped: '+e.message; }
+    }
     const args=['-ss',String(c.start),'-i','in.mp4','-t',String(c.end-c.start)];
     if(vf)args.push('-vf',vf);
     args.push('-c:v','libx264','-preset','ultrafast','-crf','23','-c:a','aac','-movflags','+faststart','out'+i+'.mp4');
@@ -244,6 +316,17 @@ $('#goYt').onclick=async()=>{
     const clips=await analyze(j.segments,$('#count2').value,$('#len2').value,j.duration);
     setStatus('Done. '+clips.length+' clips found.',100);
     const box=$('#results');
+    SEG=j.segments;
+    const drop=document.createElement('div'); drop.className='card';
+    drop.innerHTML='<b>Want real clips with captions?</b><div class="meta" style="margin:6px 0 10px">Download this video (for example from Xendrop), then pick the file here. ClipAI will cut these exact moments, crop them and burn in captions.</div><input type="file" id="ytfile" accept="video/*">';
+    box.appendChild(drop);
+    drop.querySelector('#ytfile').onchange=async e=>{
+      const f=e.target.files[0]; if(!f)return;
+      await setFile(f);
+      document.querySelector('.tab[data-t="upload"]').click();
+      renderUpload(clips);
+      setStatus('Video loaded. Pick a format and click Download clip, or Render all clips.',100);
+    };
     clips.forEach((c,i)=>{
       const s=Math.floor(c.start), e=Math.ceil(c.end);
       const link='https://youtu.be/'+j.id+'?t='+s;
