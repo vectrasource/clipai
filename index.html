@@ -267,10 +267,9 @@ function parseTranscript(txt){
   const lines=txt.split(/\r?\n/).map(l=>l.trim()).filter(Boolean);
   const items=[]; let cur=null;
   for(const l of lines){
-    let m=l.match(ts);
-    if(m){ cur={start:toSec(m),text:''}; items.push(cur); continue; }
-    m=l.match(/^(?:(\d+):)?(\d{1,2}):(\d{2})\s+(.+)$/);
-    if(m){ cur={start:toSec(m),text:m[4]}; items.push(cur); continue; }
+    if(/^sync to video time$/i.test(l)) continue;
+    const m=l.match(/^(?:(\d+):)?(\d{1,2}):(\d{2})(?:\d+ hours?, )?(?:\d+ minutes?, )?(?:\d+ seconds?)?(.*)$/);
+    if(m){ cur={start:toSec(m),text:m[4].trim()}; items.push(cur); continue; }
     if(cur) cur.text+=(cur.text?' ':'')+l;
   }
   const out=items.filter(i=>i.text);
