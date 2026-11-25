@@ -1,6 +1,8 @@
 const DEFAULT_MODELS = [
-  'openai/gpt-oss-120b:free',
-  'meta-llama/llama-3.3-70b-instruct:free'
+  'google/gemma-4-31b-it:free',
+  'nvidia/nemotron-3-ultra-550b-a55b:free',
+  'nvidia/nemotron-3.5-super-vl:free',
+  'nvidia/nemotron-3.5-lightning:free'
 ];
 
 export default async function handler(req, res) {
@@ -13,7 +15,7 @@ export default async function handler(req, res) {
 
   const mmss = s => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
   let transcript = segments.map(s => `[${Math.floor(s.start)}s ${mmss(s.start)}] ${s.text}`).join('\n');
-  if (transcript.length > 60000) transcript = transcript.slice(0, 60000); // free models have smaller context
+  if (transcript.length > 150000) transcript = transcript.slice(0, 150000);
 
   const prompt = `You are a short-form video editor. From the timestamped transcript below, pick the ${count} best moments to cut as standalone clips for YouTube Shorts / Reels / TikTok.
 
@@ -35,6 +37,7 @@ ${transcript}`;
     : DEFAULT_MODELS;
 
   let lastErr = 'AI request failed';
+  const errs = [];
   for (const model of models) {
     try {
       const r = await fetch('https://openrouter.ai/api/v1/chat/completions', {
@@ -45,10 +48,10 @@ ${transcript}`;
           'HTTP-Referer': 'https://vectrasource.com',
           'X-Title': 'ClipAI'
         },
-        body: JSON.stringify({ model, max_tokens: 2000, temperature: 0.4, messages: [{ role: 'user', content: prompt }] })
+        body: JSON.stringify({ model, max_tokens: 6000, temperature: 0.4, messages: [{ role: 'user', content: prompt }] })
       });
       const j = await r.json();
-      if (!r.ok) { lastErr = j.error?.message || `HTTP ${r.status}`; continue; }
+      if (!r.ok) { lastErr = j.error?.message || `HTTP ${r.status}`; errs.push(model + ': ' + lastErr); continue; }
       const text = j.choices?.[0]?.message?.content || '';
       const m = text.match(/\[[\s\S]*\]/);
       if (!m) { lastErr = 'AI returned no clips'; continue; }
@@ -62,5 +65,5 @@ ${transcript}`;
       lastErr = e.message;
     }
   }
-  res.status(502).json({ error: lastErr + ' (free models can be rate limited, try again in a minute)' });
+  res.status(502).json({ error: (errs.length ? errs.join(' | ') : lastErr) + ' (free models can be rate limited, try again in a minute)' });
 }
