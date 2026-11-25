@@ -21,6 +21,7 @@ export default async function handler(req, res) {
     }));
     res.status(200).json({ id, segments, duration: segments[segments.length - 1].end });
   } catch (e) {
-    res.status(404).json({ error: 'No captions available for this video (or YouTube blocked the request). Use the Upload tab instead.' });
+    const reason = String(e && e.message ? e.message : e).slice(0, 200);
+    res.status(404).json({ error: 'Could not get captions. Reason: ' + reason + ' (If this keeps happening on videos that have captions, YouTube is blocking Vercel. Use the Upload tab instead.)' });
   }
 }
