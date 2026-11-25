@@ -1,0 +1,253 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ClipAI</title>
+<style>
+:root{--bg:#0b0d12;--card:#141823;--line:#252b3b;--tx:#e8ebf3;--mut:#8b93a7;--ac:#7c5cff;--ok:#2ecc71;--bad:#ff5d6c}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--tx);font:15px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:24px 16px 80px}
+h1{margin:0 0 4px;font-size:26px}
+.sub{color:var(--mut);margin-bottom:22px}
+.tabs{display:flex;gap:8px;margin-bottom:14px}
+.tab{padding:9px 16px;border-radius:10px;border:1px solid var(--line);background:var(--card);color:var(--mut);cursor:pointer}
+.tab.on{background:var(--ac);color:#fff;border-color:var(--ac)}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px;margin-bottom:16px}
+input[type=text],input[type=file],select{width:100%;padding:11px 12px;border-radius:10px;border:1px solid var(--line);background:#0e121b;color:var(--tx)}
+button{padding:11px 18px;border-radius:10px;border:0;background:var(--ac);color:#fff;font-weight:600;cursor:pointer}
+button:disabled{opacity:.5;cursor:not-allowed}
+button.ghost{background:transparent;border:1px solid var(--line);color:var(--tx)}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.row>*{flex:0 0 auto}.row>.grow{flex:1 1 240px}
+video{width:100%;max-height:380px;border-radius:10px;background:#000}
+.status{color:var(--mut);margin-top:10px;min-height:22px;white-space:pre-wrap}
+.bar{height:6px;background:#0e121b;border-radius:6px;overflow:hidden;margin-top:8px}
+.bar i{display:block;height:100%;width:0;background:var(--ac);transition:width .2s}
+.clip{display:grid;grid-template-columns:1fr;gap:10px}
+.clip h3{margin:0;font-size:17px}
+.score{display:inline-block;padding:2px 9px;border-radius:20px;background:#1d2335;color:var(--ok);font-size:13px;margin-left:8px}
+.meta{color:var(--mut);font-size:13px}
+iframe{width:100%;aspect-ratio:16/9;border:0;border-radius:10px}
+.hide{display:none}
+label.chk{display:flex;gap:8px;align-items:center;color:var(--mut)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>ClipAI</h1>
+  <div class="sub">Find the best moments in long videos and cut them into clips.</div>
+
+  <div class="tabs">
+    <div class="tab on" data-t="upload">Upload video</div>
+    <div class="tab" data-t="yt">YouTube link</div>
+  </div>
+
+  <div id="p-upload" class="card">
+    <input type="file" id="file" accept="video/*,audio/*">
+    <video id="vid" controls class="hide" style="margin-top:12px"></video>
+    <div class="row" style="margin-top:12px">
+      <select id="count" class="grow">
+        <option value="3">Find 3 clips</option>
+        <option value="5" selected>Find 5 clips</option>
+        <option value="8">Find 8 clips</option>
+      </select>
+      <select id="len" class="grow">
+        <option value="20-40">20–40 sec (Shorts/Reels)</option>
+        <option value="30-60" selected>30–60 sec</option>
+        <option value="60-120">60–120 sec</option>
+      </select>
+      <button id="goUp" disabled>Transcribe &amp; find clips</button>
+    </div>
+    <div class="meta" style="margin-top:8px">Transcription runs in your browser (Whisper). The first run downloads the model (~40 MB). Video is never uploaded.</div>
+  </div>
+
+  <div id="p-yt" class="card hide">
+    <div class="row">
+      <input type="text" id="url" class="grow" placeholder="https://www.youtube.com/watch?v=...">
+      <select id="count2"><option value="3">3 clips</option><option value="5" selected>5 clips</option><option value="8">8 clips</option></select>
+      <select id="len2"><option value="20-40">20–40 s</option><option value="30-60" selected>30–60 s</option><option value="60-120">60–120 s</option></select>
+      <button id="goYt">Find clips</button>
+    </div>
+    <div class="meta" style="margin-top:8px">Uses the video's captions to pick moments. You get exact timestamps, a preview and share links. To export an mp4, use the Upload tab with your own file.</div>
+  </div>
+
+  <div class="card" id="statusCard" style="display:none">
+    <div class="status" id="status"></div>
+    <div class="bar"><i id="bar"></i></div>
+  </div>
+
+  <div id="results"></div>
+</div>
+
+<script src="https://unpkg.com/@ffmpeg/ffmpeg@0.12.10/dist/umd/ffmpeg.js"></script>
+<script src="https://unpkg.com/@ffmpeg/util@0.12.1/dist/umd/index.js"></script>
+<script type="module">
+const $ = s => document.querySelector(s);
+const fmt = s => { s=Math.max(0,Math.round(s)); const h=Math.floor(s/3600),m=Math.floor(s%3600/60),x=s%60; return (h?h+':'+String(m).padStart(2,'0'):m)+':'+String(x).padStart(2,'0'); };
+function setStatus(t,p){ $('#statusCard').style.display='block'; $('#status').textContent=t; if(p!=null)$('#bar').style.width=p+'%'; }
+
+document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>{
+  document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('on',x===t));
+  $('#p-upload').classList.toggle('hide',t.dataset.t!=='upload');
+  $('#p-yt').classList.toggle('hide',t.dataset.t!=='yt');
+});
+
+let file=null, fileURL=null;
+$('#file').onchange=e=>{
+  file=e.target.files[0]; if(!file)return;
+  if(fileURL)URL.revokeObjectURL(fileURL);
+  fileURL=URL.createObjectURL(file);
+  $('#vid').src=fileURL; $('#vid').classList.remove('hide'); $('#goUp').disabled=false;
+};
+
+async function analyze(segments,count,len,duration){
+  const [min,max]=len.split('-').map(Number);
+  const r=await fetch('/api/analyze',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({segments,count:+count,minLen:min,maxLen:max,duration})});
+  const j=await r.json();
+  if(!r.ok)throw new Error(j.error||'Analysis failed');
+  return j.clips;
+}
+
+/* ---------- Upload flow ---------- */
+$('#goUp').onclick=async()=>{
+  $('#goUp').disabled=true; $('#results').innerHTML='';
+  try{
+    setStatus('Reading audio…',3);
+    const buf=await file.arrayBuffer();
+    const ctx=new AudioContext({sampleRate:16000});
+    const dec=await ctx.decodeAudioData(buf.slice(0));
+    const audio=dec.getChannelData(0);
+    const duration=dec.duration;
+
+    setStatus('Loading speech model…',8);
+    const { pipeline, env } = await import('https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2');
+    env.allowLocalModels=false;
+    const asr=await pipeline('automatic-speech-recognition','Xenova/whisper-tiny',{
+      progress_callback:p=>{ if(p.status==='progress')setStatus('Downloading model… '+Math.round(p.progress)+'%',8+p.progress*0.12); }
+    });
+
+    setStatus('Transcribing… this can take a few minutes for long videos',20);
+    const out=await asr(audio,{chunk_length_s:30,stride_length_s:5,return_timestamps:true});
+    const segments=(out.chunks||[]).filter(c=>c.text.trim()).map(c=>({start:c.timestamp[0]||0,end:c.timestamp[1]??((c.timestamp[0]||0)+3),text:c.text.trim()}));
+    if(!segments.length)throw new Error('No speech detected in this file.');
+
+    setStatus('AI is picking the best moments…',85);
+    const clips=await analyze(segments,$('#count').value,$('#len').value,duration);
+    setStatus('Done. '+clips.length+' clips found.',100);
+    renderUpload(clips);
+  }catch(e){ setStatus('Error: '+e.message,0); }
+  $('#goUp').disabled=false;
+};
+
+function renderUpload(clips){
+  const box=$('#results'); box.innerHTML='';
+  clips.forEach((c,i)=>{
+    const d=document.createElement('div'); d.className='card clip';
+    d.innerHTML=`<div><h3>${i+1}. ${esc(c.title)}<span class="score">${c.score}/100</span></h3>
+      <div class="meta">${fmt(c.start)} – ${fmt(c.end)} · ${Math.round(c.end-c.start)}s</div></div>
+      <div>${esc(c.reason)}</div>
+      <div class="row">
+        <button class="ghost pv">Preview</button>
+        <select class="fmt">
+          <option value="orig">Original (landscape)</option>
+          <option value="v916" selected>9:16 crop (Shorts/Reels/TikTok)</option>
+          <option value="blur916">9:16 full video + blur background</option>
+          <option value="sq">1:1 square crop</option>
+          <option value="v45">4:5 crop (Instagram feed)</option>
+        </select>
+        <label class="chk">Crop position <input type="range" class="pos" min="0" max="100" value="50"></label>
+        <button class="dl">Download clip</button>
+        <span class="meta st"></span>
+      </div>`;
+    d.querySelector('.pv').onclick=()=>{ const v=$('#vid'); v.currentTime=c.start; v.play(); v.scrollIntoView({behavior:'smooth',block:'center'}); const stop=()=>{ if(v.currentTime>=c.end){v.pause();v.removeEventListener('timeupdate',stop);} }; v.addEventListener('timeupdate',stop); };
+    d.querySelector('.dl').onclick=()=>cut(c,i,d);
+    box.appendChild(d);
+  });
+}
+
+function cropTo(ar,ow,oh,pos){
+  const v=$('#vid'), W=v.videoWidth, H=v.videoHeight;
+  let cw,ch;
+  if(W/H>ar){ ch=H; cw=Math.round(H*ar); } else { cw=W; ch=Math.round(W/ar); }
+  cw-=cw%2; ch-=ch%2;
+  const x=Math.round((W-cw)*pos), y=Math.round((H-ch)*0.5);
+  return `crop=${cw}:${ch}:${x}:${y},scale=${ow}:${oh}`;
+}
+function filterFor(mode,pos){
+  if(mode==='v916') return cropTo(9/16,720,1280,pos);
+  if(mode==='sq') return cropTo(1,720,720,pos);
+  if(mode==='v45') return cropTo(4/5,720,900,pos);
+  if(mode==='blur916') return 'split[a][b];[a]scale=720:1280:force_original_aspect_ratio=increase,crop=720:1280,boxblur=20:5[bg];[b]scale=720:-2[fg];[bg][fg]overlay=(W-w)/2:(H-h)/2';
+  return '';
+}
+
+let ff=null;
+async function getFF(st){
+  if(ff)return ff;
+  const { FFmpeg }=FFmpegWASM; const { toBlobURL }=FFmpegUtil;
+  const f=new FFmpeg();
+  const core='https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd';
+  st.textContent='Loading video engine…';
+  await f.load({
+    classWorkerURL:await toBlobURL('https://unpkg.com/@ffmpeg/ffmpeg@0.12.10/dist/umd/814.ffmpeg.js','text/javascript'),
+    coreURL:await toBlobURL(core+'/ffmpeg-core.js','text/javascript'),
+    wasmURL:await toBlobURL(core+'/ffmpeg-core.wasm','application/wasm')
+  });
+  ff=f; return f;
+}
+let inputWritten=false;
+async function cut(c,i,d){
+  const st=d.querySelector('.st'), btn=d.querySelector('.dl'); btn.disabled=true;
+  try{
+    const f=await getFF(st);
+    if(!inputWritten){ st.textContent='Preparing file…'; await f.writeFile('in.mp4',await FFmpegUtil.fetchFile(file)); inputWritten=true; }
+    const vf=filterFor(d.querySelector('.fmt').value,d.querySelector('.pos').value/100);
+    const args=['-ss',String(c.start),'-i','in.mp4','-t',String(c.end-c.start)];
+    if(vf)args.push('-vf',vf);
+    args.push('-c:v','libx264','-preset','ultrafast','-crf','23','-c:a','aac','-movflags','+faststart','out'+i+'.mp4');
+    f.on('progress',({progress})=>{ st.textContent='Cutting… '+Math.round(Math.min(1,progress)*100)+'%'; });
+    await f.exec(args);
+    const data=await f.readFile('out'+i+'.mp4');
+    const url=URL.createObjectURL(new Blob([data.buffer],{type:'video/mp4'}));
+    const a=document.createElement('a'); a.href=url; a.download='clip-'+(i+1)+'.mp4'; a.click();
+    st.textContent='Saved.';
+  }catch(e){ st.textContent='Error: '+e.message; }
+  btn.disabled=false;
+}
+
+/* ---------- YouTube flow ---------- */
+$('#goYt').onclick=async()=>{
+  const url=$('#url').value.trim(); if(!url)return;
+  $('#goYt').disabled=true; $('#results').innerHTML='';
+  try{
+    setStatus('Fetching captions…',20);
+    const r=await fetch('/api/transcript?url='+encodeURIComponent(url));
+    const j=await r.json();
+    if(!r.ok)throw new Error(j.error||'Could not get captions');
+    setStatus('AI is picking the best moments…',70);
+    const clips=await analyze(j.segments,$('#count2').value,$('#len2').value,j.duration);
+    setStatus('Done. '+clips.length+' clips found.',100);
+    const box=$('#results');
+    clips.forEach((c,i)=>{
+      const s=Math.floor(c.start), e=Math.ceil(c.end);
+      const link='https://youtu.be/'+j.id+'?t='+s;
+      const d=document.createElement('div'); d.className='card clip';
+      d.innerHTML=`<div><h3>${i+1}. ${esc(c.title)}<span class="score">${c.score}/100</span></h3>
+        <div class="meta">${fmt(c.start)} – ${fmt(c.end)} · ${Math.round(c.end-c.start)}s</div></div>
+        <div>${esc(c.reason)}</div>
+        <iframe src="https://www.youtube.com/embed/${j.id}?start=${s}&end=${e}" allowfullscreen></iframe>
+        <div class="row"><button class="ghost cp">Copy link at start</button><button class="ghost ct">Copy timestamps</button></div>`;
+      d.querySelector('.cp').onclick=()=>navigator.clipboard.writeText(link);
+      d.querySelector('.ct').onclick=()=>navigator.clipboard.writeText(fmt(c.start)+' - '+fmt(c.end)+' '+c.title);
+      box.appendChild(d);
+    });
+  }catch(e){ setStatus('Error: '+e.message,0); }
+  $('#goYt').disabled=false;
+};
+
+function esc(s){ return String(s??'').replace(/[&<>"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m])); }
+</script>
+</body>
+</html>
