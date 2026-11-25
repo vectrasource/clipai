@@ -70,6 +70,10 @@ label.chk{display:flex;gap:8px;align-items:center;color:var(--mut)}
       <select id="len2"><option value="20-40">20–40 s</option><option value="30-60" selected>30–60 s</option><option value="60-120">60–120 s</option></select>
       <button id="goYt">Find clips</button>
     </div>
+    <details style="margin-top:12px">
+      <summary class="meta" style="cursor:pointer">Captions not loading? Paste the transcript instead</summary>
+      <textarea id="manual" rows="6" style="width:100%;margin-top:8px;padding:10px;border-radius:10px;border:1px solid var(--line);background:#0e121b;color:var(--tx)" placeholder="On the YouTube video: tap ...more under the description, click Show transcript, select all the text with timestamps, copy and paste here. Keep the link above filled in."></textarea>
+    </details>
     <div class="meta" style="margin-top:8px">Uses the video's captions to pick moments. You get exact timestamps, a preview and share links. To export an mp4, use the Upload tab with your own file.</div>
   </div>
 
@@ -222,10 +226,20 @@ $('#goYt').onclick=async()=>{
   const url=$('#url').value.trim(); if(!url)return;
   $('#goYt').disabled=true; $('#results').innerHTML='';
   try{
-    setStatus('Fetching captions…',20);
-    const r=await fetch('/api/transcript?url='+encodeURIComponent(url));
-    const j=await r.json();
-    if(!r.ok)throw new Error(j.error||'Could not get captions');
+    let j;
+    const manual=$('#manual').value.trim();
+    if(manual){
+      const id=(url.match(/(?:v=|youtu\.be\/|shorts\/|embed\/)([A-Za-z0-9_-]{11})/)||[])[1];
+      if(!id)throw new Error('Invalid YouTube link');
+      const segs=parseTranscript(manual);
+      if(!segs.length)throw new Error('Could not read the pasted transcript. It needs timestamps like 0:15 before each line.');
+      j={id,segments:segs,duration:segs[segs.length-1].end};
+    } else {
+      setStatus('Fetching captions…',20);
+      const r=await fetch('/api/transcript?url='+encodeURIComponent(url));
+      j=await r.json();
+      if(!r.ok)throw new Error(j.error||'Could not get captions');
+    }
     setStatus('AI is picking the best moments…',70);
     const clips=await analyze(j.segments,$('#count2').value,$('#len2').value,j.duration);
     setStatus('Done. '+clips.length+' clips found.',100);
@@ -246,6 +260,23 @@ $('#goYt').onclick=async()=>{
   }catch(e){ setStatus('Error: '+e.message,0); }
   $('#goYt').disabled=false;
 };
+
+function parseTranscript(txt){
+  const ts=/^(?:(\d+):)?(\d{1,2}):(\d{2})$/;
+  const toSec=m=>(+(m[1]||0))*3600+(+m[2])*60+(+m[3]);
+  const lines=txt.split(/\r?\n/).map(l=>l.trim()).filter(Boolean);
+  const items=[]; let cur=null;
+  for(const l of lines){
+    let m=l.match(ts);
+    if(m){ cur={start:toSec(m),text:''}; items.push(cur); continue; }
+    m=l.match(/^(?:(\d+):)?(\d{1,2}):(\d{2})\s+(.+)$/);
+    if(m){ cur={start:toSec(m),text:m[4]}; items.push(cur); continue; }
+    if(cur) cur.text+=(cur.text?' ':'')+l;
+  }
+  const out=items.filter(i=>i.text);
+  out.forEach((s,i)=>{ s.end=out[i+1]?out[i+1].start:s.start+5; });
+  return out;
+}
 
 function esc(s){ return String(s??'').replace(/[&<>"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m])); }
 </script>
