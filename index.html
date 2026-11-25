@@ -20,8 +20,7 @@ button{padding:11px 18px;border-radius:10px;border:0;background:var(--ac);color:
 button:disabled{opacity:.5;cursor:not-allowed}
 button.ghost{background:transparent;border:1px solid var(--line);color:var(--tx)}
 .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
-.row>*{flex:0 0 auto}.row>.grow{flex:1 1 240px}
-video{width:100%;max-height:380px;border-radius:10px;background:#000}
+.row>*{flex:0 0 auto}.row>.grow{flex:1 1 220px}
 .status{color:var(--mut);margin-top:10px;min-height:22px;white-space:pre-wrap}
 .bar{height:6px;background:#0e121b;border-radius:6px;overflow:hidden;margin-top:8px}
 .bar i{display:block;height:100%;width:0;background:var(--ac);transition:width .2s}
@@ -30,14 +29,22 @@ video{width:100%;max-height:380px;border-radius:10px;background:#000}
 .score{display:inline-block;padding:2px 9px;border-radius:20px;background:#1d2335;color:var(--ok);font-size:13px;margin-left:8px}
 .meta{color:var(--mut);font-size:13px}
 iframe{width:100%;aspect-ratio:16/9;border:0;border-radius:10px}
-.hide{display:none}
+.hide{display:none!important}
 label.chk{display:flex;gap:8px;align-items:center;color:var(--mut)}
+#stage{position:relative;line-height:0;margin-top:12px;border-radius:10px;overflow:hidden;background:#000;user-select:none}
+#stage video{width:100%;display:block;max-height:70vh;background:#000}
+#frame{position:absolute;border:2px solid #fff;box-shadow:0 0 0 9999px rgba(0,0,0,.6);cursor:move;touch-action:none}
+#frame::after{content:"";position:absolute;inset:0;background:
+  linear-gradient(to right,transparent 33%,rgba(255,255,255,.25) 33%,rgba(255,255,255,.25) calc(33% + 1px),transparent calc(33% + 1px),transparent 66%,rgba(255,255,255,.25) 66%,rgba(255,255,255,.25) calc(66% + 1px),transparent calc(66% + 1px)),
+  linear-gradient(to bottom,transparent 33%,rgba(255,255,255,.25) 33%,rgba(255,255,255,.25) calc(33% + 1px),transparent calc(33% + 1px),transparent 66%,rgba(255,255,255,.25) 66%,rgba(255,255,255,.25) calc(66% + 1px),transparent calc(66% + 1px))}
+.studio{margin-top:12px;padding:14px;border:1px solid var(--line);border-radius:12px;background:#10141e}
+.studio b{display:block;margin-bottom:8px}
 </style>
 </head>
 <body>
 <div class="wrap">
   <h1>ClipAI</h1>
-  <div class="sub">Find the best moments in long videos and cut them into clips.</div>
+  <div class="sub">Find the best moments in long videos and cut them into ready-to-upload clips.</div>
 
   <div class="tabs">
     <div class="tab on" data-t="upload">Upload video</div>
@@ -46,7 +53,36 @@ label.chk{display:flex;gap:8px;align-items:center;color:var(--mut)}
 
   <div id="p-upload" class="card">
     <input type="file" id="file" accept="video/*,audio/*">
-    <video id="vid" controls class="hide" style="margin-top:12px"></video>
+
+    <div id="stage" class="hide">
+      <video id="vid" playsinline></video>
+      <div id="frame" class="hide"></div>
+    </div>
+    <div id="vctl" class="row hide" style="margin-top:8px">
+      <button class="ghost" id="pp" style="padding:8px 14px">Play</button>
+      <input type="range" id="seek" class="grow" min="0" max="1000" value="0">
+      <span class="meta" id="tm">0:00</span>
+    </div>
+
+    <div id="studio" class="studio hide">
+      <b>Crop and output</b>
+      <div class="row">
+        <select id="fmt" class="grow">
+          <option value="v916" selected>9:16 vertical (Shorts / Reels / TikTok)</option>
+          <option value="blur916">9:16, full video on blurred background</option>
+          <option value="sq">1:1 square</option>
+          <option value="v45">4:5 (Instagram feed)</option>
+          <option value="orig">Original size, no crop</option>
+        </select>
+        <select id="qual">
+          <option value="720" selected>720p (faster)</option>
+          <option value="1080">1080p (sharper, slower)</option>
+        </select>
+        <label class="chk" id="zoomWrap">Frame size <input type="range" id="zoom" min="35" max="100" value="100"></label>
+      </div>
+      <div class="meta" style="margin-top:8px" id="cropHint">Drag the white frame on the video to choose what part of the picture is kept. Use the slider to make the frame smaller (zoom in).</div>
+    </div>
+
     <div class="row" style="margin-top:12px">
       <select id="count" class="grow">
         <option value="3">Find 3 clips</option>
@@ -74,7 +110,7 @@ label.chk{display:flex;gap:8px;align-items:center;color:var(--mut)}
       <summary class="meta" style="cursor:pointer">Captions not loading? Paste the transcript instead</summary>
       <textarea id="manual" rows="6" style="width:100%;margin-top:8px;padding:10px;border-radius:10px;border:1px solid var(--line);background:#0e121b;color:var(--tx)" placeholder="On the YouTube video: tap ...more under the description, click Show transcript, select all the text with timestamps, copy and paste here. Keep the link above filled in."></textarea>
     </details>
-    <div class="meta" style="margin-top:8px">Uses the video's captions to pick moments. You get exact timestamps, a preview and share links. To export an mp4, use the Upload tab with your own file.</div>
+    <div class="meta" style="margin-top:8px">This tab only finds the moments. To get the finished video files, download the video first, then pick the file in the box that appears under the results.</div>
   </div>
 
   <div class="card" id="statusCard" style="display:none">
@@ -91,6 +127,7 @@ label.chk{display:flex;gap:8px;align-items:center;color:var(--mut)}
 const $ = s => document.querySelector(s);
 const fmt = s => { s=Math.max(0,Math.round(s)); const h=Math.floor(s/3600),m=Math.floor(s%3600/60),x=s%60; return (h?h+':'+String(m).padStart(2,'0'):m)+':'+String(x).padStart(2,'0'); };
 function setStatus(t,p){ $('#statusCard').style.display='block'; $('#status').textContent=t; if(p!=null)$('#bar').style.width=p+'%'; }
+function esc(s){ return String(s??'').replace(/[&<>"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m])); }
 
 document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>{
   document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('on',x===t));
@@ -98,16 +135,74 @@ document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>{
   $('#p-yt').classList.toggle('hide',t.dataset.t!=='yt');
 });
 
-let file=null, fileURL=null, SEG=[];
+/* ---------- File + video player ---------- */
+let file=null, fileURL=null, SEG=[], inputWritten=false;
+const vid=$('#vid');
+
 function setFile(f){
   file=f; inputWritten=false;
   if(fileURL)URL.revokeObjectURL(fileURL);
   fileURL=URL.createObjectURL(f);
-  const v=$('#vid'); v.src=fileURL; v.classList.remove('hide'); $('#goUp').disabled=false;
-  return new Promise(res=>{ v.onloadedmetadata=()=>res(); setTimeout(res,4000); });
+  vid.src=fileURL;
+  ['#stage','#vctl','#studio'].forEach(s=>$(s).classList.remove('hide'));
+  $('#goUp').disabled=false;
+  return new Promise(res=>{ vid.onloadedmetadata=()=>{ CR.cx=0.5; CR.cy=0.5; paintFrame(); res(); }; setTimeout(res,4000); });
 }
 $('#file').onchange=e=>{ if(e.target.files[0])setFile(e.target.files[0]); };
 
+vid.addEventListener('timeupdate',()=>{
+  if(vid.duration){ $('#seek').value=vid.currentTime/vid.duration*1000; $('#tm').textContent=fmt(vid.currentTime)+' / '+fmt(vid.duration); }
+});
+vid.addEventListener('play',()=>$('#pp').textContent='Pause');
+vid.addEventListener('pause',()=>$('#pp').textContent='Play');
+$('#seek').oninput=()=>{ if(vid.duration) vid.currentTime=$('#seek').value/1000*vid.duration; };
+$('#pp').onclick=()=>{ vid.paused?vid.play():vid.pause(); };
+
+/* ---------- Crop frame ---------- */
+const AR={v916:9/16,sq:1,v45:4/5};
+const CR={cx:0.5,cy:0.5,zoom:1};
+
+function frameBox(){
+  const mode=$('#fmt').value, ar=AR[mode];
+  if(!ar) return null;
+  const W=vid.videoWidth||16, H=vid.videoHeight||9;
+  const fhMax=Math.min(1,W/(ar*H));
+  const fh=fhMax*CR.zoom, fw=fh*ar*H/W;
+  let left=CR.cx-fw/2, top=CR.cy-fh/2;
+  left=Math.min(Math.max(left,0),1-fw); top=Math.min(Math.max(top,0),1-fh);
+  CR.cx=left+fw/2; CR.cy=top+fh/2;
+  return {left,top,fw,fh};
+}
+function paintFrame(){
+  const fr=$('#frame'), b=frameBox();
+  const noVideo=!vid.videoWidth;
+  const isCrop=!!AR[$('#fmt').value];
+  $('#zoomWrap').classList.toggle('hide',!isCrop);
+  $('#cropHint').textContent=isCrop
+    ? 'Drag the white frame on the video to choose what part of the picture is kept. Use the slider to make the frame smaller (zoom in).'
+    : ($('#fmt').value==='blur916' ? 'The whole video is placed in the middle of a vertical canvas with a blurred copy behind it.' : 'The clip keeps the original picture size.');
+  if(!b||noVideo){ fr.classList.add('hide'); return; }
+  fr.classList.remove('hide');
+  fr.style.left=(b.left*100)+'%'; fr.style.top=(b.top*100)+'%';
+  fr.style.width=(b.fw*100)+'%'; fr.style.height=(b.fh*100)+'%';
+}
+$('#fmt').onchange=paintFrame;
+$('#zoom').oninput=()=>{ CR.zoom=$('#zoom').value/100; paintFrame(); };
+vid.addEventListener('loadedmetadata',paintFrame);
+
+let drag=null;
+const fr=$('#frame');
+fr.addEventListener('pointerdown',e=>{ drag={x:e.clientX,y:e.clientY,cx:CR.cx,cy:CR.cy}; fr.setPointerCapture(e.pointerId); e.preventDefault(); });
+fr.addEventListener('pointermove',e=>{
+  if(!drag)return;
+  const r=$('#stage').getBoundingClientRect();
+  CR.cx=drag.cx+(e.clientX-drag.x)/r.width; CR.cy=drag.cy+(e.clientY-drag.y)/r.height;
+  paintFrame();
+});
+fr.addEventListener('pointerup',()=>{ drag=null; });
+window.addEventListener('resize',paintFrame);
+
+/* ---------- AI analysis ---------- */
 async function analyze(segments,count,len,duration){
   const [min,max]=len.split('-').map(Number);
   const r=await fetch('/api/analyze',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({segments,count:+count,minLen:min,maxLen:max,duration})});
@@ -142,7 +237,7 @@ $('#goUp').onclick=async()=>{
 
     setStatus('AI is picking the best moments…',85);
     const clips=await analyze(segments,$('#count').value,$('#len').value,duration);
-    setStatus('Done. '+clips.length+' clips found.',100);
+    setStatus('Done. '+clips.length+' clips found. Set your crop frame above, then download.',100);
     renderUpload(clips);
   }catch(e){ setStatus('Error: '+e.message,0); }
   $('#goUp').disabled=false;
@@ -158,52 +253,50 @@ function renderUpload(clips){
       <div>${esc(c.reason)}</div>
       <div class="row">
         <button class="ghost pv">Preview</button>
-        <select class="fmt">
-          <option value="orig">Original (landscape)</option>
-          <option value="v916" selected>9:16 crop (Shorts/Reels/TikTok)</option>
-          <option value="blur916">9:16 full video + blur background</option>
-          <option value="sq">1:1 square crop</option>
-          <option value="v45">4:5 crop (Instagram feed)</option>
-        </select>
-        <label class="chk">Crop position <input type="range" class="pos" min="0" max="100" value="50"></label>
         <label class="chk"><input type="checkbox" class="cap" checked> Captions</label>
-        <button class="dl">Download clip</button>
+        <button class="dl">Make clip (mp4)</button>
         <span class="meta st"></span>
       </div>`;
-    d.querySelector('.pv').onclick=()=>{ const v=$('#vid'); v.currentTime=c.start; v.play(); v.scrollIntoView({behavior:'smooth',block:'center'}); const stop=()=>{ if(v.currentTime>=c.end){v.pause();v.removeEventListener('timeupdate',stop);} }; v.addEventListener('timeupdate',stop); };
+    d.querySelector('.pv').onclick=()=>{
+      vid.currentTime=c.start; vid.play();
+      $('#stage').scrollIntoView({behavior:'smooth',block:'center'});
+      const stop=()=>{ if(vid.currentTime>=c.end){ vid.pause(); vid.removeEventListener('timeupdate',stop); } };
+      vid.addEventListener('timeupdate',stop);
+    };
     d.querySelector('.dl').onclick=()=>cut(c,i,d);
     items.push([c,i,d]);
     box.appendChild(d);
   });
   if(items.length>1){
     const all=document.createElement('div'); all.className='card';
-    all.innerHTML='<div class="row"><button class="all">Render all clips</button><span class="meta">Uses the format, crop and caption settings of each clip. Rendering runs in your browser, so it can take a few minutes per clip.</span></div>';
+    all.innerHTML='<div class="row"><button class="all">Make all clips</button><span class="meta">Uses your crop frame and caption settings. Rendering runs in your browser, so it can take a minute or more per clip.</span></div>';
     all.querySelector('.all').onclick=async()=>{ for(const [c,i,d] of items){ await cut(c,i,d); } };
     box.prepend(all);
   }
 }
 
-function cropTo(ar,ow,oh,pos){
-  const v=$('#vid'), W=v.videoWidth, H=v.videoHeight;
-  let cw,ch;
-  if(W/H>ar){ ch=H; cw=Math.round(H*ar); } else { cw=W; ch=Math.round(W/ar); }
-  cw-=cw%2; ch-=ch%2;
-  const x=Math.round((W-cw)*pos), y=Math.round((H-ch)*0.5);
-  return `crop=${cw}:${ch}:${x}:${y},scale=${ow}:${oh}`;
-}
-function filterFor(mode,pos){
-  if(mode==='v916') return cropTo(9/16,720,1280,pos);
-  if(mode==='sq') return cropTo(1,720,720,pos);
-  if(mode==='v45') return cropTo(4/5,720,900,pos);
-  if(mode==='blur916') return 'split[a][b];[a]scale=720:1280:force_original_aspect_ratio=increase,crop=720:1280,boxblur=20:5[bg];[b]scale=720:-2[fg];[bg][fg]overlay=(W-w)/2:(H-h)/2';
-  return '';
-}
-
+/* ---------- Output sizes, crop filter, captions ---------- */
+function qualW(){ return +$('#qual').value; }
 function outDims(mode){
-  if(mode==='v916'||mode==='blur916') return {w:720,h:1280};
-  if(mode==='sq') return {w:720,h:720};
-  if(mode==='v45') return {w:720,h:900};
-  const v=$('#vid'); return {w:v.videoWidth||1280,h:v.videoHeight||720};
+  const q=qualW();
+  if(AR[mode]) return {w:q,h:Math.round(q/AR[mode]/2)*2};
+  if(mode==='blur916') return {w:q,h:Math.round(q*16/9/2)*2};
+  return {w:vid.videoWidth||1280,h:vid.videoHeight||720};
+}
+function filterFor(mode){
+  const W=vid.videoWidth, H=vid.videoHeight, o=outDims(mode);
+  if(AR[mode]){
+    const b=frameBox();
+    let cw=Math.round(b.fw*W), ch=Math.round(b.fh*H);
+    cw-=cw%2; ch-=ch%2;
+    let x=Math.round(b.left*W), y=Math.round(b.top*H);
+    x=Math.max(0,Math.min(x,W-cw)); y=Math.max(0,Math.min(y,H-ch));
+    return `crop=${cw}:${ch}:${x}:${y},scale=${o.w}:${o.h}`;
+  }
+  if(mode==='blur916'){
+    return `split[a][b];[a]scale=${o.w}:${o.h}:force_original_aspect_ratio=increase,crop=${o.w}:${o.h},boxblur=20:5[bg];[b]scale=${o.w}:-2[fg];[bg][fg]overlay=(W-w)/2:(H-h)/2`;
+  }
+  return '';
 }
 function assT(t){
   const cs=Math.max(0,Math.round(t*100));
@@ -248,6 +341,7 @@ async function ensureFont(f,st){
   fontReady=true;
 }
 
+/* ---------- ffmpeg cutting ---------- */
 let ff=null;
 async function getFF(st){
   if(ff)return ff;
@@ -262,38 +356,64 @@ async function getFF(st){
   });
   ff=f; return f;
 }
-let inputWritten=false;
+
 async function cut(c,i,d){
   const st=d.querySelector('.st'), btn=d.querySelector('.dl'); btn.disabled=true;
   try{
     const f=await getFF(st);
-    if(!inputWritten){ st.textContent='Preparing file…'; await f.writeFile('in.mp4',await FFmpegUtil.fetchFile(file)); inputWritten=true; }
-    const mode=d.querySelector('.fmt').value;
-    let vf=filterFor(mode,d.querySelector('.pos').value/100);
+    if(!inputWritten){ st.textContent='Preparing video…'; await f.writeFile('in.mp4',await FFmpegUtil.fetchFile(file)); inputWritten=true; }
+
+    const mode=$('#fmt').value;
+    const baseVf=filterFor(mode);
+    let capVf=null;
     if(d.querySelector('.cap').checked && SEG.length){
       try{
         await ensureFont(f,st);
         const ass=buildASS(c,outDims(mode));
-        if(ass){
-          await f.writeFile('cap.ass',new TextEncoder().encode(ass));
-          vf=(vf?vf+',':'')+'ass=cap.ass:fontsdir=/fonts';
-        }
+        if(ass){ await f.writeFile('cap.ass',new TextEncoder().encode(ass)); capVf=(baseVf?baseVf+',':'')+'ass=cap.ass:fontsdir=/fonts'; }
       }catch(e){ st.textContent='Captions skipped: '+e.message; }
     }
-    const args=['-ss',String(c.start),'-i','in.mp4','-t',String(c.end-c.start)];
-    if(vf)args.push('-vf',vf);
-    args.push('-c:v','libx264','-preset','ultrafast','-crf','23','-c:a','aac','-movflags','+faststart','out'+i+'.mp4');
-    f.on('progress',({progress})=>{ st.textContent='Cutting… '+Math.round(Math.min(1,progress)*100)+'%'; });
-    await f.exec(args);
+
+    const run=async vf=>{
+      const args=['-ss',String(c.start),'-i','in.mp4','-t',String(c.end-c.start)];
+      if(vf)args.push('-vf',vf);
+      args.push('-c:v','libx264','-preset','ultrafast','-crf','23','-pix_fmt','yuv420p','-c:a','aac','-b:a','128k','-movflags','+faststart','out'+i+'.mp4');
+      const onP=({progress})=>{ st.textContent='Rendering… '+Math.round(Math.min(1,Math.max(0,progress))*100)+'%'; };
+      f.on('progress',onP);
+      let code;
+      try{ code=await f.exec(args); } finally { f.off('progress',onP); }
+      return code;
+    };
+
+    let note='';
+    let code=await run(capVf!==null?capVf:baseVf);
+    if(code!==0 && capVf!==null){ note=' (captions failed, saved without)'; code=await run(baseVf); }
+    if(code!==0) throw new Error('video engine failed (code '+code+')');
+
     const data=await f.readFile('out'+i+'.mp4');
     const url=URL.createObjectURL(new Blob([data.buffer],{type:'video/mp4'}));
-    const a=document.createElement('a'); a.href=url; a.download='clip-'+(i+1)+'.mp4'; a.click();
-    st.textContent='Saved.';
+    const a=document.createElement('a'); a.href=url; a.download='clip-'+(i+1)+'.mp4'; document.body.appendChild(a); a.click(); a.remove();
+    st.textContent='Saved clip-'+(i+1)+'.mp4'+note;
   }catch(e){ st.textContent='Error: '+e.message; }
   btn.disabled=false;
 }
 
 /* ---------- YouTube flow ---------- */
+function parseTranscript(txt){
+  const toSec=m=>(+(m[1]||0))*3600+(+m[2])*60+(+m[3]);
+  const lines=txt.split(/\r?\n/).map(l=>l.trim()).filter(Boolean);
+  const items=[]; let cur=null;
+  for(const l of lines){
+    if(/^sync to video time$/i.test(l)) continue;
+    const m=l.match(/^(?:(\d+):)?(\d{1,2}):(\d{2})(?:\d+ hours?, )?(?:\d+ minutes?, )?(?:\d+ seconds?)?(.*)$/);
+    if(m){ cur={start:toSec(m),text:m[4].trim()}; items.push(cur); continue; }
+    if(cur) cur.text+=(cur.text?' ':'')+l;
+  }
+  const out=items.filter(i=>i.text);
+  out.forEach((s,i)=>{ s.end=out[i+1]?out[i+1].start:s.start+5; });
+  return out;
+}
+
 $('#goYt').onclick=async()=>{
   const url=$('#url').value.trim(); if(!url)return;
   $('#goYt').disabled=true; $('#results').innerHTML='';
@@ -314,19 +434,22 @@ $('#goYt').onclick=async()=>{
     }
     setStatus('AI is picking the best moments…',70);
     const clips=await analyze(j.segments,$('#count2').value,$('#len2').value,j.duration);
-    setStatus('Done. '+clips.length+' clips found.',100);
+    setStatus('Done. '+clips.length+' moments found. Pick your downloaded video below to make the real clips.',100);
     const box=$('#results');
     SEG=j.segments;
+
     const drop=document.createElement('div'); drop.className='card';
-    drop.innerHTML='<b>Want real clips with captions?</b><div class="meta" style="margin:6px 0 10px">Download this video (for example from Xendrop), then pick the file here. ClipAI will cut these exact moments, crop them and burn in captions.</div><input type="file" id="ytfile" accept="video/*">';
+    drop.innerHTML='<b>Step 2: make the real clips</b><div class="meta" style="margin:6px 0 10px">The moments below are only timestamps. Download this video first (for example with Xendrop), then pick the downloaded file here. ClipAI will open it, let you set the crop frame, and cut these exact moments into finished mp4 files with captions.</div><input type="file" id="ytfile" accept="video/*">';
     box.appendChild(drop);
     drop.querySelector('#ytfile').onchange=async e=>{
       const f=e.target.files[0]; if(!f)return;
       await setFile(f);
       document.querySelector('.tab[data-t="upload"]').click();
       renderUpload(clips);
-      setStatus('Video loaded. Pick a format and click Download clip, or Render all clips.',100);
+      setStatus('Video loaded. Set the crop frame on the video, then click Make clip (or Make all clips).',100);
+      $('#stage').scrollIntoView({behavior:'smooth',block:'start'});
     };
+
     clips.forEach((c,i)=>{
       const s=Math.floor(c.start), e=Math.ceil(c.end);
       const link='https://youtu.be/'+j.id+'?t='+s;
@@ -343,24 +466,6 @@ $('#goYt').onclick=async()=>{
   }catch(e){ setStatus('Error: '+e.message,0); }
   $('#goYt').disabled=false;
 };
-
-function parseTranscript(txt){
-  const ts=/^(?:(\d+):)?(\d{1,2}):(\d{2})$/;
-  const toSec=m=>(+(m[1]||0))*3600+(+m[2])*60+(+m[3]);
-  const lines=txt.split(/\r?\n/).map(l=>l.trim()).filter(Boolean);
-  const items=[]; let cur=null;
-  for(const l of lines){
-    if(/^sync to video time$/i.test(l)) continue;
-    const m=l.match(/^(?:(\d+):)?(\d{1,2}):(\d{2})(?:\d+ hours?, )?(?:\d+ minutes?, )?(?:\d+ seconds?)?(.*)$/);
-    if(m){ cur={start:toSec(m),text:m[4].trim()}; items.push(cur); continue; }
-    if(cur) cur.text+=(cur.text?' ':'')+l;
-  }
-  const out=items.filter(i=>i.text);
-  out.forEach((s,i)=>{ s.end=out[i+1]?out[i+1].start:s.start+5; });
-  return out;
-}
-
-function esc(s){ return String(s??'').replace(/[&<>"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m])); }
 </script>
 </body>
 </html>
